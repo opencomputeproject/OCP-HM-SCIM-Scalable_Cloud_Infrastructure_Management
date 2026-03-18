@@ -1,1 +1,1 @@
-# OCP-HM-CSM-Cloud_Service_Model
+# OCP-HM-SCIM-Scalable_Cloud_Infrastructure_Management

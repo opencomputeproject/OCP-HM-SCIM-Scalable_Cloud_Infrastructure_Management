@@ -1,18 +1,25 @@
 ---
-title: Specification Template
-project: Foundation Staff
-version: Version DRAFT
+title: Telemetry Base Architecture
+project: Hardware Management
+version: DRAFT
+type: [Base]
+authors: [Jim Harford]
+bibliography: spec_template_ref.yaml
+License: 
 supersedes: Version aa
 status: draft
 released: false
-class: info
-date: 2026-05-28
+class: specification
+date: 2026-11-20
 paragraph_numbering: no
 header-includes: |
   \newenvironment{smallcode}{\begin{footnotesize}}{\end{footnotesize}}
 ...  
 
+
 \tableofcontents
+
+\listoffigures
 
 \listoftables
 
@@ -22,7 +29,7 @@ header-includes: |
 
 | Revision | Date       | Author(s)    | Description                     |
 | :---     | :---       | :---         | :---                            |
-| WIP      | 2026/06/04 | Jim Harford  | Under HEAVY construction        |
+| WIP      | 2026/11/20 | Jim Harford  | Under HEAVY construction        |
 
 ---  
 
@@ -305,7 +312,11 @@ A sending node shall signal its rejection of a *setup_stream* request by sending
 to the Control node.  The *reject* message should include a suggested set of stream parameters that
 the sending node is currently prepared to accept.
 
-JJH: finish this section!
+When a Control node's *setup_stream* request is rebuffed by the sending node's *reject* message,
+then the Control node can optionally attempt to restart the entire negotiation by sending another *setup_stream* request to both the receiving and sending nodes, but this new attempt could incorporate the stream parameters suggested by the sending node
+in the previous *reject* message response to the previous *setup_stream* request.
+
+If stream parameters acceptable to both the receiving and sending nodes can not be provided within some number of retries, then the control node must send a *teardown_stream* message to the receiving node if that node accepted the previous *setup_stream* request from the control node.
 
 <figure id=negotiating-stream-parms>
     <img src="./images/negotiating_stream_parms.png">
@@ -314,7 +325,11 @@ JJH: finish this section!
 
 ### Changing Stream Parameters
 
-JJH: write some text
+This section specifies how a control node can change a stream's parameters.  If the stream is currently active, then the control node must first send a *stop_stream* message to both the sending and receiving nodes.
+
+Next, the control node performs the procedures of the previous Section ???, including renegotiation if necessary.
+
+Finally, the control node must send a *start_stream* message to both the sending and receiving nodes, in order to activate the stream.
 
 <figure id=changing-stream-parms>
     <img src="./images/changing_stream_parms.png">
@@ -323,7 +338,7 @@ JJH: write some text
 
 ### Aggregating Metrics
 
-JJH: write some text
+[WIP]
 
 <figure id=aggregating-metrics>
     <img src="./images/aggregating_metrics.png">
@@ -332,7 +347,7 @@ JJH: write some text
 
 ### Filtering Metrics
 
-JJH: write some text
+[WIP]
 
 <figure id=filtering-metrics>
     <img src="./images/filtering_metrics.png">
@@ -341,7 +356,7 @@ JJH: write some text
 
 ### Storing Metrics
 
-JJH: write some text
+[WIP]
 
 <figure id=storing-metrics>
     <img src="./images/storing_metrics.png">
@@ -360,13 +375,88 @@ JJH: write some text
 
 # Message Details
 
+## Stream Management
+
+The following messages are initiated by a control node towards a non-control node, for the purpose of managing telemetry streams.
+
+### setup_stream
+
+A *setup_stream* transaction is used either to establish a new telemetry stream, or change the parameters of an existing telemetry stream.
+
+#### setup_stream_request
+
+* *stream_ID* (handle_t): identifies either a new telemetry stream that is being setup, or an existing telemetry stream that is being changed.  This value shall be unique within the scope of streams known to both the requesting control node and the target non-control node.  It is further recommended that this value be unique across the entire data center domain being managed.
+* *push* (boolean): if TRUE, the node at sender_address shall autonomously send periodic metric reports to the node at receiver_address, at a frequency to be calculated from interarrival_usec.  If FALSE, the node at sender_address shall send each metric report in response to a new request_metrics message from the node at receiver_address.
+* *sender_address*: the network address (e.g. IP address) of the node that will send metric reports.
+* *receiver_address*: the network address (e.g. IP address) of the node that will receive metric reports.
+* *interarrival_usec* (uint_t): when parameter “push” is TRUE, this parameter specificies the time duration between successive metric reports autonomously sent by the sending node; otherwise, this parameter is ignored.
+* *sections*[]: 
+    * *stats_interval* (boolean): the time between successive stream reports, in micro-seconds.
+    * *reporting_format* (value_format_t): specifies the format in which a meter reports its value.  For example 64-bit unsigned integers, 32-bit signed integers, 16-bit floating point.
+    * *meters*[]: 
+        * *name* (string): identifies a meter type.
+        * *local_path* (string): identifies the local location of a meter.
+        * *virtual_index* (uint_t): identifies a specific instance of a meter type at a local location.
+        * *emit_events* (boolean): if TRUE, notification of certain asynchronous events shall be autonomously send by the sending node to indicate infrequent conditions that may require attention (e.g. temperature too high, too many packet receive errors, CPU is mostly idle).  Note that such event reports may be sent without metric values specified for the stream.  Such event-only notifications do not factor into the frequency of metric reports specified by interarrival_usec.
+
+#### setup_stream_accept
+
+* *stream_ID* (handle_t): same semantics as the request message.
+
+#### setup_stream_reject
+
+* *stream_ID* (handle_t): same semantics as the request message.
+* *result* (return_code_t): indicates the reason that the request was rejected.
+The remaining parameters are identical to those found in setup_stream_request.  In this case, they are considered suggestions by the target non-control node which would result in a successful stream setup.
+
+### start_stream
+
+A *start_stream* transaction is used to activate an existing telemetry stream.  A successful request results in the commencement of metric values being transferred from the sending node to the receiving node.
+
+#### start_stream_request
+
+* *stream_ID* (handle_t): identifies the telemetry stream that is being started, which was previously established via a setup_stream message exchange.
+
+#### start_stream_response
+
+* *stream_ID* (handle_t): same semantics as the request message.
+* *result* (return_code_t): indicates either success or the reason that the request was rejected.
+
+### stop_stream
+
+A *stop_stream* transaction is used to deactivate an existing telemetry stream.  A successful request results in the cessation of metric values being transferred from the sending node to the receiving node.
+
+#### stop_stream_request
+
+* *stream_ID* (handle_t): identifies the telemetry stream that is being stopped, which was previously established via a setup_stream message exchange.
+
+#### stop_stream_response
+
+* *stream_ID* (handle_t): same semantics as the request message.
+* *result* (return_code_t): indicates either success or the reason that the request was rejected.
+
+### teardown_stream
+
+A *teardown_stream* transaction is used to terminate an existing telemetry stream.  A successful request results removal of any shared state and freeing of any associated resources within the sending and receiving nodes of the stream.
+
+#### teardown_stream_request
+
+* *stream_ID* (handle_t): identifies the telemetry stream that is being torn down, which was previously established via a setup_stream message exchange.  Upon completion of this message exchange, the stream_ID is considered invalid.
+
+#### teardown_stream_response
+
+* *stream_ID* (handle_t): same semantics as the request message.
+* *result* (return_code_t): indicates either success or the reason that the request was rejected.
+
 ---
 
-# Compliance
+# Conformance
+
+# Supporting Documents and Repositories
 
 # License
 ## Open Web Foundation (OWF) CLA
-**To Be Done** ideally we simply pull in another md file for license*
+**To Be Done** ideally we simply pull in another md file for license
 
 Contributions to this Specification are made under the terms and conditions set forth in **Modified Open Web Foundation Agreement 0.9 (OWFa 0.9)**. (As of October 16, 2024)  (“Contribution License”) by:
 
@@ -384,9 +474,6 @@ NOTWITHSTANDING THE FOREGOING LICENSES, THIS SPECIFICATION IS PROVIDED BY OCP "A
 
 \beginappendices  
 
-# Appendix  
-
-## Glossary and Abbreviations
-## References
-## Requirement Summary
-## Another Appendix Section
+# Glossary and Abbreviations
+# References
+# Another Appendix Section
